@@ -442,7 +442,7 @@
 ! 10. Source code :
 !
 !/ ------------------------------------------------------------------- /
-      USE W3GDATMD,  ONLY: NGRIDS, NAUXGR, IGRID, W3SETG, NX, NY, NSEA
+      USE W3GDATMD,  ONLY: NGRIDS, NAUXGR, IGRID, W3SETG, NX, NY
 #ifdef W3_SMC
       USE W3GDATMD,  ONLY: FSWND, NSEA
 #endif
@@ -462,7 +462,7 @@
 !/ ------------------------------------------------------------------- /
 !/ Local parameters
 !/
-      INTEGER                 :: JGRID, NXG, NYG
+      INTEGER                 :: JGRID
       LOGICAL                 :: FLAGSTIDE(4)=.FALSE.
 #ifdef W3_S
       INTEGER, SAVE           :: IENT = 0
@@ -500,13 +500,6 @@
 ! -------------------------------------------------------------------- /
 ! 2.  Allocate arrays
 !
-#if defined(W3_UWM) || defined(CESMCOUPLED)
-      NXG = NSEA
-      NYG = 1
-#else
-      NXG = NX
-      NYG = NY
-#endif
 #ifdef W3_TIDE
       IF ( PRESENT(FLAGSTIDEIN) ) THEN
           FLAGSTIDE(:) = FLAGSTIDEIN(:)
@@ -545,41 +538,41 @@
 !     "all or nothing" rather than 5 individual flags
 
       IF ( FLIC1  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%ICEP1(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%ICEP1(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
       IF ( FLIC2  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%ICEP2(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%ICEP2(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
       IF ( FLIC3  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%ICEP3(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%ICEP3(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
       IF ( FLIC4  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%ICEP4(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%ICEP4(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
       IF ( FLIC5  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%ICEP5(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%ICEP5(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
 !
       IF ( FLMDN  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%MUDD(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%MUDD(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
       IF ( FLMTH  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%MUDT(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%MUDT(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
       IF ( FLMVS  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%MUDV(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%MUDV(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
 !
       IF ( FLLEV  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%WLEV(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%WLEV(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
         END IF
 !
@@ -592,10 +585,10 @@
                      INPUTS(IMOD)%CYN(NSEA,1) , STAT=ISTAT )
        ELSE
 #endif
-          ALLOCATE ( INPUTS(IMOD)%CX0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%CY0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%CXN(NXG,NYG) ,              &
-                     INPUTS(IMOD)%CYN(NXG,NYG) , STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%CX0(NX,NY) ,              &
+                     INPUTS(IMOD)%CY0(NX,NY) ,              &
+                     INPUTS(IMOD)%CXN(NX,NY) ,              &
+                     INPUTS(IMOD)%CYN(NX,NY) , STAT=ISTAT )
 #ifdef W3_SMC
        ENDIF
 #endif
@@ -635,12 +628,12 @@
                      INPUTS(IMOD)%DTN(NSEA,1) , STAT=ISTAT )
        ELSE
 #endif
-          ALLOCATE ( INPUTS(IMOD)%WX0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%WY0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%DT0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%WXN(NXG,NYG) ,              &
-                     INPUTS(IMOD)%WYN(NXG,NYG) ,              &
-                     INPUTS(IMOD)%DTN(NXG,NYG) , STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%WX0(NX,NY) ,              &
+                     INPUTS(IMOD)%WY0(NX,NY) ,              &
+                     INPUTS(IMOD)%DT0(NX,NY) ,              &
+                     INPUTS(IMOD)%WXN(NX,NY) ,              &
+                     INPUTS(IMOD)%WYN(NX,NY) ,              &
+                     INPUTS(IMOD)%DTN(NX,NY) , STAT=ISTAT )
 #ifdef W3_SMC
        ENDIF
 #endif
@@ -650,8 +643,8 @@
         END IF
 !
       IF ( FLICE  ) THEN
-          ALLOCATE ( INPUTS(IMOD)%ICEI(NXG,NYG),              &
-                     INPUTS(IMOD)%BERGI(NXG,NYG), STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%ICEI(NX,NY),              &
+                     INPUTS(IMOD)%BERGI(NX,NY), STAT=ISTAT )
           CHECK_ALLOC_STATUS ( ISTAT )
           INPUTS(IMOD)%BERGI = 0.
         END IF
@@ -665,10 +658,10 @@
                      INPUTS(IMOD)%UYN(NSEA,1) , STAT=ISTAT )
        ELSE
 #endif
-          ALLOCATE ( INPUTS(IMOD)%UX0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%UY0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%UXN(NXG,NYG) ,              &
-                     INPUTS(IMOD)%UYN(NXG,NYG) , STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%UX0(NX,NY) ,              &
+                     INPUTS(IMOD)%UY0(NX,NY) ,              &
+                     INPUTS(IMOD)%UXN(NX,NY) ,              &
+                     INPUTS(IMOD)%UYN(NX,NY) , STAT=ISTAT )
 #ifdef W3_SMC
        ENDIF
 #endif
@@ -682,8 +675,8 @@
                      INPUTS(IMOD)%RHN(NSEA,1) , STAT=ISTAT )
        ELSE
 #endif
-          ALLOCATE ( INPUTS(IMOD)%RH0(NXG,NYG) ,              &
-                     INPUTS(IMOD)%RHN(NXG,NYG) , STAT=ISTAT )
+          ALLOCATE ( INPUTS(IMOD)%RH0(NX,NY) ,              &
+                     INPUTS(IMOD)%RHN(NX,NY) , STAT=ISTAT )
 #ifdef W3_SMC
        ENDIF
 #endif
@@ -691,7 +684,7 @@
         END IF
 !
 #ifdef CESMCOUPLED
-        ALLOCATE ( INPUTS(IMOD)%HML(NXG,NYG), STAT=ISTAT )
+        ALLOCATE ( INPUTS(IMOD)%HML(NX,NY), STAT=ISTAT )
         CHECK_ALLOC_STATUS ( ISTAT )
 #endif
 !

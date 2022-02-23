@@ -1214,13 +1214,15 @@ contains
     use w3gdatmd, only: nsea, mapsf, nx, ny
 
     real(r4), intent(in)    :: global_data(nsea)
-    real(r4), intent(inout) :: globalfield(nsea,1)
+    real(r4), intent(inout) :: globalfield(nx,ny)
 
     ! local variables
     integer           :: isea, ix, iy
 
     do isea = 1,nsea
-       globalfield(isea,1) = global_data(isea)
+       ix = mapsf(isea,1)
+       iy = mapsf(isea,2)
+       globalfield(ix,iy) = global_data(isea)
     end do
 
   end subroutine fillglobal_with_import
@@ -1233,13 +1235,15 @@ contains
     real(r4), intent(in)    :: global_data(nsea)
     real(r4), intent(in)    :: global_mask(nsea)
     real(r4), intent(in)    :: filedata(nsea)
-    real(r4), intent(inout) :: globalfield(nsea,1)
+    real(r4), intent(inout) :: globalfield(nx,ny)
 
     ! local variables
     integer           :: isea, ix, iy
 
     do isea = 1,nsea
-       globalfield(isea,1) = global_data(isea)*global_mask(isea) + (1.0_r4 - global_mask(isea))*filedata(isea)
+       ix = mapsf(isea,1)
+       iy = mapsf(isea,2)
+       globalfield(ix,iy) = global_data(isea)*global_mask(isea) + (1.0_r4 - global_mask(isea))*filedata(isea)
     end do
 
   end subroutine fillglobal_with_merge_import
