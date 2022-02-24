@@ -136,7 +136,14 @@ module wav_comp_nuopc
   use wav_shr_mod           , only : chkerr, state_setscalar, state_getscalar, alarmInit, ymd2date
   use wav_shr_mod           , only : runtype, merge_import, dbug_flag
   use w3odatmd              , only : nds, iaproc, napout
-  use wav_shr_mod           , only : casename, inst_suffix, inst_index
+  use wmwavemd              , only : wmwave
+  use wmupdtmd              , only : wmupd2
+  use constants             , only : is_esmf_component
+  use w3updtmd              , only : w3uini
+  use wmmdatmd              , only : mdse, mdst, nrgrd, improc, nmproc, wmsetm, stime, etime
+  use wmmdatmd              , only : nmpscr
+  use w3adatmd              , only : flcold, fliwnd
+  use wav_shr_mod           , only : casename, multigrid, inst_suffix, inst_index
   use wav_shr_mod           , only : time_origin, calendar_name, elapsed_secs
 
   implicit none
@@ -169,6 +176,7 @@ module wav_comp_nuopc
 #else
   logical :: cesmcoupled = .false.
 #endif
+  integer, allocatable :: tend(:,:)
 
   integer     , parameter :: debug = 1
   character(*), parameter :: modName =  "(wav_comp_nuopc)"
@@ -350,6 +358,12 @@ contains
     write(logmsg,'(A,i6)') trim(subname)//': Wave cap dbug_flag is ',dbug_flag
     call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
 
+    multigrid = .false.
+    call NUOPC_CompAttributeGet(gcomp, name='multigrid', value=cvalue, isPresent=isPresent, isSet=isSet, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    if (isPresent .and. isSet) multigrid=(trim(cvalue)=="true")
+    write(logmsg,'(A,l)') trim(subname)//': Wave multigrid setting is ',multigrid
+    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
     ! Get casename
     call NUOPC_CompAttributeGet(gcomp, name="case_name", value=casename, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -384,7 +398,9 @@ contains
     use w3adatmd     , only : w3naux, w3seta
     use w3idatmd     , only : w3seti, w3ninp
     use w3gdatmd     , only : nseal, nsea, nx, ny, mapsf, w3nmod, w3setg
-    use w3wdatmd     , only : time, w3ndat, w3dimw, w3setw
+    use w3wdatmd     , only : va, time, w3ndat, w3dimw, w3setw
+    use wminitmd     , only : wminit, wminitnml
+    use wmunitmd     , only : wmuget, wmuset
     use wav_shel_inp , only : set_shel_io
 
     ! input/output variables
@@ -434,8 +450,12 @@ contains
     character(ESMF_MAXSTR)         :: diro
     character(ESMF_MAXSTR)         :: timestring
     character(CL)                  :: logfile
+    logical                        :: local
+    integer                        :: imod, idsi, idso, idss, idst, idse
     integer                        :: mds(13) ! Note that nds is set to this in w3initmod
     integer                        :: stdout
+    character(ESMF_MAXSTR)         :: preamb = './'
+    character(ESMF_MAXSTR)         :: ifname = 'ww3_multi.inp'
     character(len=*), parameter    :: subname = '(wav_comp_nuopc:InitializeRealize)'
     ! -------------------------------------------------------------------
 
@@ -446,6 +466,7 @@ contains
     ! Set up data structures
     !--------------------------------------------------------------------
 
+    if (.not. multigrid) then
     call w3nmod ( 1, 6, 6 )
     call w3ndat (    6, 6 )
     call w3naux (    6, 6 )
@@ -457,6 +478,7 @@ contains
     call w3seta ( 1, 6, 6 )
     call w3seto ( 1, 6, 6 )
     call w3seti ( 1, 6, 6 )
+    end if
 
     !----------------------------------------------------------------------------
     ! Generate local mpi comm
@@ -465,12 +487,20 @@ contains
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    call ESMF_VMGet(vm, mpiCommunicator=mpi_comm, peCount=naproc, localPet=iam, rc=rc)
+    call ESMF_VMGet(vm, mpiCommunicator=mpi_comm, peCount=nmproc, localPet=iam, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    ! naproc,iproc, napout, naperr are not available until after wminit
+    improc = iam + 1
+    if (multigrid) then
+       nmpscr = 1
+       is_esmf_component = .true.
+    else
     iaproc = iam + 1
+       naproc = nmproc
     napout = 1
     naperr = 1
-    if (iaproc == napout) root_task = .true.
+    end if
+    if (improc == 1) root_task = .true.
 
     !--------------------------------------------------------------------
     ! IO set-up
@@ -491,7 +521,7 @@ contains
        stdout = 6
     end if
 
-    call set_shel_io(stdout,mds,ntrace)
+    if (.not. multigrid) call set_shel_io(stdout,mds,ntrace)
 
     if ( root_task ) then
        write(stdout,'(a)')'      *** WAVEWATCH III Program shell ***      '
@@ -575,12 +605,38 @@ contains
        write (stdout,'(a)')' Starting time : '//trim(dtme21)
        write (stdout,'(a,i8,2x,i8)') 'start_ymd, stop_ymd = ',start_ymd, stop_ymd
     end if
-    time = time0
+    ! TODO: Check
+    !time = time0
+    stime = time0
+    etime = timen
 
     !--------------------------------------------------------------------
     ! Wave model initialization
     !--------------------------------------------------------------------
 
+    if (multigrid) then
+       call ESMF_UtilIOUnitGet(idsi); open(unit=idsi, status='scratch')
+       call ESMF_UtilIOUnitGet(idso); open(unit=idso, status='scratch')
+       call ESMF_UtilIOUnitGet(idss); open(unit=idss, status='scratch')
+       call ESMF_UtilIOUnitGet(idst); open(unit=idst, status='scratch')
+       call ESMF_UtilIOUnitGet(idse); open(unit=idse, status='scratch')
+       close(idsi); close(idso); close(idss); close(idst); close(idse)
+
+       if ( trim(ifname) == 'ww3_multi.nml' ) then
+         call wminitnml ( idsi, idso, idss, idst, idse, trim(ifname), &
+                          mpi_comm, preamb=preamb )
+       else
+         call wminit ( idsi, idso, idss, idst, idse, trim(ifname), &
+                       mpi_comm, preamb=preamb )
+       endif
+
+       allocate(tend(2,nrgrd))
+       do imod = 1,nrgrd
+          tend(1,imod) = etime(1)
+          tend(2,imod) = etime(2)
+       end do
+       call ESMF_LogWrite(trim(subname)//' done = wminit', ESMF_LOGMSG_INFO)
+    else
     if (cesmcoupled) then
        call ESMF_ClockGet( clock, timeStep=timeStep, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -591,6 +647,7 @@ contains
     else
        call waveinit_ufs(gcomp, ntrace, mpi_comm, mds, rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    end if
     end if
     ! call mpi_barrier ( mpi_comm, ierr )
 
@@ -710,6 +767,19 @@ contains
     call realize_fields(gcomp, mesh=Emesh, flds_scalar_name=flds_scalar_name, &
          flds_scalar_num=flds_scalar_num, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    !TODO: when is this required?
+    if (multigrid) then
+       do imod = 1,nrgrd
+         call w3setg ( imod, mdse, mdst )
+         call w3setw ( imod, mdse, mdst )
+         call w3seta ( imod, mdse, mdst )
+         call w3seti ( imod, mdse, mdst )
+         call w3seto ( imod, mdse, mdst )
+         call wmsetm ( imod, mdse, mdst )
+         local = iaproc .gt. 0 .and. iaproc .le. naproc
+         if ( local .and. flcold .and. fliwnd ) call w3uini( va )
+       enddo
+    end if
 
     if (dbug_flag > 5) call ESMF_LogWrite(trim(subname)//' done', ESMF_LOGMSG_INFO)
 
@@ -808,7 +878,7 @@ contains
     !------------------------
 
     use w3wavemd          , only : w3wave
-    use w3wdatmd          , only : time
+    use w3wdatmd          , only : time, w3setw
     use wav_import_export , only : import_fields, export_fields
     use wav_shel_inp      , only : odat
     use wav_shr_mod       , only : rstwr, histwr, outfreq ! only used by cesm
@@ -825,6 +895,7 @@ contains
     type(ESMF_TimeInterval) :: timeStep, elapsedTime
     type(ESMF_Time)         :: currTime, nextTime, startTime, stopTime
     integer                 :: yy,mm,dd,hh,ss
+    integer                 :: imod
     integer                 :: ymd        ! current year-month-day
     integer                 :: tod        ! current time of day (sec)
     integer                 :: time0(2)
@@ -888,6 +959,12 @@ contains
     timen(2) = hh*10000 + mm*100 + ss
 
     time = time0
+    if (multigrid) then
+       do imod = 1,nrgrd
+          tend(1,imod) = timen(1)
+          tend(2,imod) = timen(2)
+       end do
+    end if
 
     !------------
     ! Obtain import data from import state
@@ -912,7 +989,7 @@ contains
           if (ChkErr(rc,__LINE__,u_FILE_u)) return
        else
           rstwr = .false.
-       endif
+       end if
     else
        rstwr = .false.
     end if
@@ -926,7 +1003,7 @@ contains
           ! output every outfreq hours if appropriate
           if( mod(hh, outfreq) == 0 ) then
              histwr = .true.
-          endif
+          end if
        endif
        if (.not. histwr) then
        if (histwr_is_active) then
@@ -939,7 +1016,7 @@ contains
              if (ChkErr(rc,__LINE__,u_FILE_u)) return
           else
              histwr = .false.
-          endif
+          end if
        end if
        if ( root_task ) then
           !  write(nds(1),*) 'wav_comp_nuopc time', time, timen
@@ -948,7 +1025,11 @@ contains
     end if
 
     ! Advance the wave model
+    if (multigrid) then
+       call wmwave ( tend )
+    else
     call w3wave ( 1, odat, timen )
+    end if
     if(profile_memory) call ESMF_VMLogMemInfo("Exiting  WW3 Run : ")
 
     !------------
@@ -1207,7 +1288,7 @@ contains
        end if
        close (unitn)
 
-       ! Write out input 
+       ! Write out input
        write(mds(1),*)
        write(mds(1),'(a)')' --------------------------------------------------'
        write(mds(1),'(a)')'  Initializations : '
