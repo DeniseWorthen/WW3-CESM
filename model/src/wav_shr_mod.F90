@@ -39,9 +39,9 @@ module wav_shr_mod
 
   ! used by both CESM and UFS
   ! runtype is used by W3SRCE (values are startup, branch, continue)
-  character(len=cs) , public :: runtype
-  logical           , public :: wav_coupling_to_cice = .false. ! TODO: generalize this
-  integer           , public :: dbug_flag = 0
+  character(len=cs)  , public :: runtype
+  logical            , public :: wav_coupling_to_cice = .false. ! TODO: generalize this
+  integer            , public :: dbug_flag = 0
   character(len=256) , public :: casename
   character(len= 36) , public :: time_origin
   character(len= 36) , public :: calendar_name

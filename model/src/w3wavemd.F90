@@ -85,7 +85,7 @@
 !/    22-Mar-2021 : Update TAUA, RHOA                   ( version 7.13 )
 !/    06-May-2021 : Use ARCTC and SMCTYPE options. JGLi ( version 7.13 )
 !/    19-Jul-2021 : Momentum and air density support    ( version 7.14 )
-!/    11-Nov-2021 : Remove XYB since it is obsolete     ( version 7.xx ) 
+!/    11-Nov-2021 : Remove XYB since it is obsolete     ( version 7.xx )
 !/
 !/    Copyright 2009-2014 National Weather Service (NWS),
 !/       National Oceanic and Atmospheric Administration.  All rights
@@ -3211,8 +3211,8 @@
                       ! This assumes that W3_SBS is not defined
                       IF ( ( J .EQ. 1 ) ) THEN
                           if ( histwr ) then
-                          CALL MPI_WAITALL( NRQGO, IRQGO, STATIO, IERR_MPI )
-                          FLGMPI(0) = .FALSE.
+                             CALL MPI_WAITALL( NRQGO, IRQGO, STATIO, IERR_MPI )
+                             FLGMPI(0) = .FALSE.
                           end if
                           write(*,*) 'CESM w3wavemd: hist flag 1', j, histwr, time, IERR_MPI
                           IF ( IAPROC .EQ. NAPFLD ) THEN
@@ -3221,7 +3221,7 @@
                               FLGMPI(1) = .FALSE.
                               write(*,*) 'CESM w3wavemd: hist flag 2', j, histwr, time, IERR_MPI
                               if ( histwr ) then
-                              CALL W3IOGONCD ()
+                                 CALL W3IOGONCD ()
                               else
                                  CALL W3IOGO( 'WRITE', NDS(7), ITEST, IMOD )
                               end if
