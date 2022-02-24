@@ -637,17 +637,17 @@ contains
        end do
        call ESMF_LogWrite(trim(subname)//' done = wminit', ESMF_LOGMSG_INFO)
     else
-    if (cesmcoupled) then
-       call ESMF_ClockGet( clock, timeStep=timeStep, rc=rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       call ESMF_TimeIntervalGet( timeStep, s=dtime_sync, rc=rc )
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       call waveinit_cesm(gcomp, ntrace, mpi_comm, dtime_sync, mds, rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    else
-       call waveinit_ufs(gcomp, ntrace, mpi_comm, mds, rc)
-       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    end if
+       if (cesmcoupled) then
+          call ESMF_ClockGet( clock, timeStep=timeStep, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          call ESMF_TimeIntervalGet( timeStep, s=dtime_sync, rc=rc )
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+          call waveinit_cesm(gcomp, ntrace, mpi_comm, dtime_sync, mds, rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       else
+          call waveinit_ufs(gcomp, ntrace, mpi_comm, mds, rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       end if
     end if
     ! call mpi_barrier ( mpi_comm, ierr )
 
@@ -1163,9 +1163,9 @@ contains
        call ESMF_AlarmSet(stop_alarm, clock=mclock, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-          !----------------
-          ! History alarm
-          !----------------
+       !----------------
+       ! History alarm
+       !----------------
        call NUOPC_CompAttributeGet(gcomp, name="history_option", isPresent=isPresent, isSet=isSet, rc=rc)
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
        if (isPresent .and. isSet) then
@@ -1195,7 +1195,6 @@ contains
           history_n = -999
           histwr_is_active = .false.
        end if
-
     end if
 
     !--------------------------------
