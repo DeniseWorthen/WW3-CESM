@@ -128,18 +128,19 @@ module wav_comp_nuopc
   use NUOPC_Model           , only : model_label_DataInitialize => label_DataInitialize
   use NUOPC_Model           , only : model_label_SetRunClock    => label_SetRunClock
   use NUOPC_Model           , only : model_label_Finalize       => label_Finalize
-  use NUOPC_Model           , only : NUOPC_ModelGet
-  use wav_kind_mod          , only : r8=>shr_kind_r8, i8=>shr_kind_i8, cl=>shr_kind_cl, cs=>shr_kind_cs
+  use NUOPC_Model           , only : NUOPC_ModelGet, SetVM
+  use wav_kind_mod          , only : r8=>shr_kind_r8, i8=>shr_kind_i8, i4=>shr_kind_i4
+  use wav_kind_mod          , only : cl=>shr_kind_cl, cs=>shr_kind_cs
   use wav_import_export     , only : advertise_fields, realize_fields
-  use wav_import_export     , only : state_getfldptr, state_fldchk
-  use wav_shr_mod           , only : chkerr, state_setscalar, state_getscalar, state_diagnose, alarmInit, ymd2date
+  use wav_shr_mod           , only : state_diagnose, state_getfldptr, state_fldchk
+  use wav_shr_mod           , only : chkerr, state_setscalar, state_getscalar, alarmInit, ymd2date
   use wav_shr_mod           , only : runtype, merge_import, dbug_flag
   use w3odatmd              , only : nds, iaproc, napout
 
   implicit none
   private ! except
 
-  public  :: SetServices
+  public  :: SetServices, SetVM
   private :: InitializeP0
   private :: InitializeAdvertise
   private :: InitializeRealize
@@ -360,7 +361,7 @@ contains
     use w3timemd     , only : stme21
     use w3adatmd     , only : w3naux, w3seta
     use w3idatmd     , only : w3seti, w3ninp
-    use w3gdatmd     , only : nseal, nsea, nx, ny, mapsf, w3nmod, w3setg, nx, ny
+    use w3gdatmd     , only : nseal, nsea, nx, ny, mapsf, w3nmod, w3setg
     use w3wdatmd     , only : time, w3ndat, w3dimw, w3setw
 
     ! input/output variables
@@ -373,6 +374,7 @@ contains
     ! local variables
     type(ESMF_DistGrid)            :: distGrid
     type(ESMF_Mesh)                :: Emesh, EmeshTemp
+    type(ESMF_Array)               :: elemMaskArray
     type(ESMF_VM)                  :: vm
     type(ESMF_Time)                :: esmfTime, stopTime
     type(ESMF_TimeInterval)        :: TimeStep
@@ -399,6 +401,8 @@ contains
     integer, allocatable           :: gindex_lnd(:)
     integer, allocatable           :: gindex_sea(:)
     integer, allocatable           :: gindex(:)
+    integer(i4)                    :: maskmin
+    integer(i4), pointer           :: meshmask(:)
     logical                        :: isPresent, isSet
     character(23)                  :: dtme21
     integer                        :: iam, mpi_comm
@@ -612,6 +616,7 @@ contains
     ! create a global index array for non-sea (i.e. land points)
     allocate(mask_global(nx*ny), mask_local(nx*ny))
     mask_local(:) = 0
+    mask_global(:) = 0
     do jsea=1, nseal
        isea = iaproc + (jsea-1)*naproc
        ix = mapsf(isea,1)
@@ -632,7 +637,7 @@ contains
     allocate(gindex_lnd(my_lnd_end - my_lnd_start + 1))
     ncnt = 0
     do n = 1,nx*ny
-       if (mask_global(n) == 0) then ! this is a land pont
+       if (mask_global(n) == 0) then ! this is a land point
           ncnt = ncnt + 1
           if (ncnt >= my_lnd_start .and. ncnt <= my_lnd_end) then
              gindex_lnd(ncnt - my_lnd_start + 1) = n
@@ -640,6 +645,7 @@ contains
        end if
     end do
     deallocate(mask_global)
+    deallocate(mask_local)
 
     ! create a global index that includes both sea and land - but put land at the end
     nlnd = (my_lnd_end - my_lnd_start + 1)
@@ -651,6 +657,8 @@ contains
           gindex(ncnt) = gindex_lnd(ncnt-nseal)
        end if
     end do
+    deallocate(gindex_sea)
+    deallocate(gindex_lnd)
 
     ! create distGrid from global index array
     DistGrid = ESMF_DistGridCreate(arbSeqIndexList=gindex, rc=rc)
@@ -671,6 +679,34 @@ contains
     EMesh = ESMF_MeshCreate(EMeshTemp, elementDistgrid=Distgrid, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+    ! obtain the mesh mask and find the minimum value across all PEs
+    call ESMF_DistGridGet(Distgrid, localDe=0, elementCount=ncnt, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    allocate(meshmask(ncnt))
+    elemMaskArray = ESMF_ArrayCreate(Distgrid, farrayPtr=meshmask, rc=rc)
+    if (chkerr(rc,__LINE__,u_FILE_u)) return
+    call ESMF_MeshGet(Emesh, elemMaskArray=elemMaskArray, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call ESMF_VMAllFullReduce(vm, sendData=meshmask, recvData=maskmin, count=ncnt, &
+         reduceflag=ESMF_REDUCE_MIN, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    if (maskmin == 1) then
+       ! replace mesh mask with internal mask
+       meshmask(:) = 0
+       meshmask(1:nseal) = 1
+       call ESMF_MeshSet(mesh=EMesh, elementMask=meshmask, rc=rc)
+       if (chkerr(rc,__LINE__,u_FILE_u)) return
+    end if
+
+    if (dbug_flag > 5) then
+       call ESMF_ArrayWrite(elemMaskArray, 'meshmask.nc', variableName = 'mask', &
+            overwrite=.true., rc=rc)
+       if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    end if
+    deallocate(meshmask)
+    deallocate(gindex)
+
     !--------------------------------------------------------------------
     ! Realize the actively coupled fields
     !--------------------------------------------------------------------
@@ -686,7 +722,6 @@ contains
 
   subroutine DataInitialize(gcomp, rc)
 
-    use wav_import_export, only : state_getfldptr, state_fldchk
     use wav_import_export, only : calcRoughl
     use wav_shr_mod      , only : wav_coupling_to_cice
     use w3gdatmd         , only : nx, ny
@@ -704,31 +739,7 @@ contains
     real(r8), pointer :: sw_vstokes(:)
     real(r8), pointer :: wav_tauice1(:)
     real(r8), pointer :: wav_tauice2(:)
-    real(r8), pointer :: wave_elevation_spectrum1(:)
-    real(r8), pointer :: wave_elevation_spectrum2(:)
-    real(r8), pointer :: wave_elevation_spectrum3(:)
-    real(r8), pointer :: wave_elevation_spectrum4(:)
-    real(r8), pointer :: wave_elevation_spectrum5(:)
-    real(r8), pointer :: wave_elevation_spectrum6(:)
-    real(r8), pointer :: wave_elevation_spectrum7(:)
-    real(r8), pointer :: wave_elevation_spectrum8(:)
-    real(r8), pointer :: wave_elevation_spectrum9(:)
-    real(r8), pointer :: wave_elevation_spectrum10(:)
-    real(r8), pointer :: wave_elevation_spectrum11(:)
-    real(r8), pointer :: wave_elevation_spectrum12(:)
-    real(r8), pointer :: wave_elevation_spectrum13(:)
-    real(r8), pointer :: wave_elevation_spectrum14(:)
-    real(r8), pointer :: wave_elevation_spectrum15(:)
-    real(r8), pointer :: wave_elevation_spectrum16(:)
-    real(r8), pointer :: wave_elevation_spectrum17(:)
-    real(r8), pointer :: wave_elevation_spectrum18(:)
-    real(r8), pointer :: wave_elevation_spectrum19(:)
-    real(r8), pointer :: wave_elevation_spectrum20(:)
-    real(r8), pointer :: wave_elevation_spectrum21(:)
-    real(r8), pointer :: wave_elevation_spectrum22(:)
-    real(r8), pointer :: wave_elevation_spectrum23(:)
-    real(r8), pointer :: wave_elevation_spectrum24(:)
-    real(r8), pointer :: wave_elevation_spectrum25(:)
+    real(r8), pointer :: wave_elevation_spectrum(:,:)
     character(len=*),parameter :: subname = '(wav_comp_nuopc:DataInitialize)'
     ! -------------------------------------------------------------------
 
@@ -768,84 +779,12 @@ contains
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
       call state_getfldptr(exportState, 'wav_tauice2', wav_tauice2, rc=rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum1', fldptr1d=wave_elevation_spectrum1, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum2', fldptr1d=wave_elevation_spectrum2, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum3', fldptr1d=wave_elevation_spectrum3, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum4', fldptr1d=wave_elevation_spectrum4, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum5', fldptr1d=wave_elevation_spectrum5, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum6', fldptr1d=wave_elevation_spectrum6, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum7', fldptr1d=wave_elevation_spectrum7, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum8', fldptr1d=wave_elevation_spectrum8, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum9', fldptr1d=wave_elevation_spectrum9, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum10', fldptr1d=wave_elevation_spectrum10, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum11', fldptr1d=wave_elevation_spectrum11, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum12', fldptr1d=wave_elevation_spectrum12, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum13', fldptr1d=wave_elevation_spectrum13, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum14', fldptr1d=wave_elevation_spectrum14, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum15', fldptr1d=wave_elevation_spectrum15, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum16', fldptr1d=wave_elevation_spectrum16, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum17', fldptr1d=wave_elevation_spectrum17, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum18', fldptr1d=wave_elevation_spectrum18, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum19', fldptr1d=wave_elevation_spectrum19, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum20', fldptr1d=wave_elevation_spectrum20, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum21', fldptr1d=wave_elevation_spectrum21, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum22', fldptr1d=wave_elevation_spectrum22, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum23', fldptr1d=wave_elevation_spectrum23, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum24', fldptr1d=wave_elevation_spectrum24, rc=rc)
-      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      call state_getfldptr(exportState, 'wave_elevation_spectrum25', fldptr1d=wave_elevation_spectrum25, rc=rc)
+      call state_getfldptr(exportState, 'wave_elevation_spectrum', fldptr2d=wave_elevation_spectrum, rc=rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-      wav_tauice1              (:) = 0.
-      wav_tauice2              (:) = 0.
-      wave_elevation_spectrum1 (:) = 0.
-      wave_elevation_spectrum2 (:) = 0.
-      wave_elevation_spectrum3 (:) = 0.
-      wave_elevation_spectrum4 (:) = 0.
-      wave_elevation_spectrum5 (:) = 0.
-      wave_elevation_spectrum6 (:) = 0.
-      wave_elevation_spectrum7 (:) = 0.
-      wave_elevation_spectrum8 (:) = 0.
-      wave_elevation_spectrum9 (:) = 0.
-      wave_elevation_spectrum10(:) = 0.
-      wave_elevation_spectrum11(:) = 0.
-      wave_elevation_spectrum12(:) = 0.
-      wave_elevation_spectrum13(:) = 0.
-      wave_elevation_spectrum14(:) = 0.
-      wave_elevation_spectrum15(:) = 0.
-      wave_elevation_spectrum16(:) = 0.
-      wave_elevation_spectrum17(:) = 0.
-      wave_elevation_spectrum18(:) = 0.
-      wave_elevation_spectrum19(:) = 0.
-      wave_elevation_spectrum20(:) = 0.
-      wave_elevation_spectrum21(:) = 0.
-      wave_elevation_spectrum22(:) = 0.
-      wave_elevation_spectrum23(:) = 0.
-      wave_elevation_spectrum24(:) = 0.
-      wave_elevation_spectrum25(:) = 0.
+       wav_tauice1(:) = 0.
+       wav_tauice2(:) = 0.
+       wave_elevation_spectrum(:,:) = 0.
     endif
 
     ! Set global grid size scalars in export state
